@@ -5,6 +5,7 @@ description: |
   两种入口：(1)明确人名→直接蒸馏 (2)模糊需求→诊断推荐→再蒸馏。
   触发词：「造skill」「蒸馏XX」「女娲」「造人」「XX的思维方式」「做个XX视角」「更新XX的skill」。
   模糊需求也触发：「我想提升决策质量」「有没有一种思维方式能帮我...」「我需要一个思维顾问」。
+  【Hermes适配版】已替换 Claude Code 子路径为 Hermes $HERMES_HOME/skills/，6路并行Agent使用 delegate_task 调度。
 ---
 
 # 女娲 · Skill造人术
@@ -46,7 +47,7 @@ description: |
 1. **这个人/主题是谁**：确保理解正确
 2. **聚焦方向**（可选）：全面画像 vs 聚焦某个维度？
 3. **用途**：思维顾问？决策参考？角色扮演？
-4. **新建 or 更新**：是否已有该人物的Skill？（检查 `.claude/skills/` 目录）
+4. **新建 or 更新**：是否已有该人物的Skill？（检查 `skills/` 目录，即 `F:\C_Redirect\hermes\skills\`）
 5. **本地语料**：「你手上有没有这个人的一手素材？比如书籍PDF、演讲/访谈transcript、视频字幕、个人博客导出等。有的话直接丢给我，比网上搜的质量高得多。」
 
 用户说「就做XX」没有更多信息 → 默认全面画像 + 思维顾问 + 无本地语料（走网络搜索），直接推进。
@@ -108,7 +109,7 @@ description: |
 - 不确定 → 推荐中同时包含两种类型，让用户选
 
 **来源A：本地已有Skill**
-扫描 `.claude/skills/*-perspective/` 目录，读取每个SKILL.md的description，匹配用户需求。已有Skill可以即插即用，不需要重新蒸馏。如果扫描结果为空（用户还没有任何perspective skill），跳过此步，只从来源B推荐。
+扫描 `$HERMES_HOME/skills/*-perspective/` 目录，读取每个SKILL.md的description，匹配用户需求。已有Skill可以即插即用，不需要重新蒸馏。如果扫描结果为空（用户还没有任何perspective skill），跳过此步，只从来源B推荐。
 
 **来源B：新蒸馏候选**
 基于需求维度表中的「思维框架方向」列，匹配最相关的人物或主题。推荐时说清楚：这个人的哪个思维框架能解决用户的具体问题。
@@ -141,7 +142,7 @@ description: |
 **收到确认后立即执行**，在调研之前完成：
 
 ```
-.claude/skills/[person-name]-perspective/
+$HERMES_HOME/skills/[person-name]-perspective/   （即 F:\C_Redirect\hermes\skills\）
 ├── SKILL.md                          # 最终产物
 ├── scripts/                          # 工具脚本（字幕下载/清洗/质量检查）
 └── references/
@@ -207,7 +208,7 @@ description: |
 
 以下是6个Agent的标准任务分配（纯网络搜索模式，或本地语料模式中缺失维度的补充搜索）：
 
-启动6个并行subagent，每个负责不同信息维度。
+启动6个并行Agent，每个负责不同信息维度。使用 Hermes 的 `delegate_task` 工具进行并行调度。每个 Agent 必须将调研结果写入对应的 md 文件。
 
 #### 6个Agent的任务分配
 
@@ -228,7 +229,7 @@ description: |
 
 #### Agent prompt模板
 
-spawn subagent时，用以下结构给任务（以Agent 1著作为例）：
+使用 Hermes `delegate_task` 启动 Agent 时，用以下结构给任务（以Agent 1著作为例）：
 
 ```
 你的任务：调研[人名]的著作和系统性长文。
@@ -269,19 +270,19 @@ spawn subagent时，用以下结构给任务（以Agent 1著作为例）：
   - 自动检查6项通过标准：心智模型数量、局限性、表达DNA、诚实边界、内在张力、一手来源占比
   - 输出逐项PASS/FAIL和总结
 
-#### 利用已安装的信息获取Skill
+#### 利用 Hermes 原生工具增强采集
 
-Phase 1启动前，**主动扫描 `.claude/skills/` 目录**，检查是否有可用于信息获取的skill。如果有，在调研中优先调用，比WebSearch更稳定高效：
+Phase 1启动前，**确认以下 Hermes 原生工具可用**，在调研中优先使用，比通用 WebSearch 更稳定高效：
 
-| 已安装Skill | 用途 | 调用场景 |
+| Hermes 工具 | 用途 | 调用场景 |
 |------------|------|---------|
-| `gemini-video` | 分析本地视频文件，提取transcript | 用户提供了视频文件但没有字幕 |
-| `web-article-reader` | 精确读取网页文章全文 | 找到重要文章URL时，精确提取而非依赖搜索摘要 |
-| `agent-reach` | 多渠道信息获取（17个平台） | 需要从X/Reddit/YouTube等平台获取信息 |
-| `huashu-research` | 结构化深度调研 | 需要对某个维度做深度调研而非广撒网 |
-| `pdf` | 读取PDF书籍/论文 | 用户提供了PDF格式的一手素材 |
+| `web_search` (DuckDuckGo) | 网页搜索，获取标题+链接+摘要 | 所有Agent的基础搜索入口 |
+| `browser` (Camofox) | 浏览器自动化，访问动态页面、提取JS渲染内容 | 需要访问X/Twitter、YouTube等动态平台时 |
+| `vision_analyze` | 图片/视频截图分析 | 分析人物演讲截图、封面图、图表等视觉信息 |
+| `delegate_task(tasks=[])` | 并行启动6个调研Agent | Phase 1 核心调度机制 |
+| `read_file` / `write_file` | 读写调研文件 | 保存每个Agent的调研结果到 references/research/ |
 
-**执行方式**：在spawn subagent时，把可用skill的名称和用途告知agent，让agent在调研中按需调用。这比让agent自己用WebSearch摸索效率高得多。
+**执行方式**：在 delegate_task 启动 Agent 时，把可用工具和用途告知 Agent，让 Agent 在调研中按需调用。
 
 #### 信息源优先级
 
@@ -498,16 +499,16 @@ Phase 2提炼完成后，暂停展示提炼摘要给用户确认：
 构建完成后，读取 `references/extraction-framework.md` 末尾的「质量自检清单」，逐项检查。不通过的项标注出来，回到对应Phase修复。
 
 #### Step 4: 输出
-将完成的SKILL.md写入 `.claude/skills/[person-name]-perspective/SKILL.md`。
+将完成的SKILL.md写入 `$HERMES_HOME/skills/[person-name]-perspective/SKILL.md`（即 `F:\C_Redirect\hermes\skills\[person-name]-perspective\SKILL.md`）。
 
 ---
 
 ### Phase 4: 质量验证
 
-生成Skill后，用子agent执行3项测试（独立于主agent，避免自评偏差）：
+生成Skill后，用 Hermes `delegate_task` 执行3项测试（独立于主Agent，避免自评偏差）：
 
 #### 4.1 已知测试（Sanity Check）
-选3个此人公开表态过的问题，**spawn子agent带着新Skill回答**，对比实际立场。
+选3个此人公开表态过的问题，**用 delegate_task 启动子Agent带着新Skill回答**，对比实际立场。
 - 方向一致 → 模型有效
 - 偏离 → 回溯调整心智模型权重
 
@@ -544,7 +545,7 @@ Phase 2提炼完成后，暂停展示提炼摘要给用户确认：
 
 Phase 4 验证通过后，自动启动双Agent精炼，进一步提升Skill可操作性：
 
-**并行启动两个Agent：**
+**并行启动两个Agent（使用 delegate_task tasks=[] 并行）：**
 
 **Agent A（auto-skill-optimizer视角）**：
 - 对SKILL.md执行8维度结构评估（工作流清晰度、边界条件、检查点设计、指令具体性等）
